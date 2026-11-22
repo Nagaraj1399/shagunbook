@@ -83,8 +83,8 @@ function wordsToNumber(s) {
   return total + cur;
 }
 
-async function extract(text) {
-  if (MOCK_SARVAM) {
+function localExtract(text) {
+  {
     const t = text.toLowerCase();
     const isVendor = /(ko|vendor|caterer|decorator|dj|photographer|mehendi)\b/.test(t) && /de diya|diye|paid/.test(t) && !/ne /.test(t);
     if (isVendor) {
@@ -96,10 +96,15 @@ async function extract(text) {
     const place = (text.match(/(\S+)\s+wale/i) || [])[1] || "";
     return { type: "shagun", guest, place, amount: wordsToNumber(t.split(" ne ")[1] || t), mode: /upi/.test(t) ? "upi" : /gift/.test(t) ? "gift" : "cash" };
   }
+}
+
+async function extract(text) {
+  if (MOCK_SARVAM) return localExtract(text);
+  try {
   const r = await fetch(`${SARVAM}/v1/chat/completions`, {
     method: "POST", headers: { ...sh(), "Authorization": `Bearer ${SARVAM_KEY}`, "Content-Type": "application/json" },
     body: JSON.stringify({
-      model: "sarvam-105b", temperature: 0.1, max_tokens: 800, // verify current model name
+      model: "sarvam-105b", temperature: 0.1, max_tokens: 4000, // verify current model name
       messages: [
         { role: "system", content: `Convert spoken Indian wedding ledger notes to JSON. Received from guest: {"type":"shagun","guest":"","place":"","amount":0,"mode":"cash|upi|gift"}. Paid to vendor: {"type":"vendor","vendor":"","service":"","paid":0,"totalQuote":null}. "ikyavan sau"=5100, "pachas hazaar"=50000, "do lakh"=200000. Reply ONLY JSON.` },
         { role: "user", content: text },
@@ -107,8 +112,16 @@ async function extract(text) {
     }),
   });
   if (!r.ok) throw new Error("CHAT " + r.status + " " + (await r.text()));
-  const out = (await r.json()).choices[0].message.content;
-  return JSON.parse(out.match(/\{[\s\S]*\}/)[0]);
+  const msg = (await r.json()).choices[0].message;
+  const out = msg.content || msg.reasoning_content || "";
+  const all = out.match(/\{[^{}]*\}/g) || [];
+  const parsed = all.map((s) => { try { return JSON.parse(s); } catch { return null; } }).filter((o) => o && o.type).pop();
+  if (!parsed) throw new Error("no JSON in model reply");
+  return parsed;
+  } catch (e) {
+    console.error("LLM extract failed, using local parser:", e.message);
+    return localExtract(text);
+  }
 }
 
 async function translate(text, target) {
