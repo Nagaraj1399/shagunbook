@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ShagunBook (rehearsal)</title>
+<style>
+  :root { --maroon:#7B1E1E; --gold:#F4A300; --cream:#FFF8E7; --ink:#2b1a12; --fs:1; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:system-ui,sans-serif; background:var(--cream); color:var(--ink); font-size:calc(16px*var(--fs)); }
+  header { background:var(--maroon); color:#fff; padding:14px 16px; display:flex; justify-content:space-between; align-items:center; }
+  header h1 { margin:0; font-size:1.25em; } header small { opacity:.8; }
+  .banner { padding:10px 16px; font-weight:600; }
+  .warn { background:#ffe8a3; } .info { background:#fde2e2; }
+  main { padding:16px 16px 140px; max-width:560px; margin:auto; }
+  .total { background:#fff; border-radius:14px; padding:14px; margin-bottom:12px; border:2px solid var(--gold); }
+  .total b { font-size:1.8em; color:var(--maroon); display:block; }
+  .row { background:#fff; border-radius:12px; padding:12px; margin:8px 0; display:flex; justify-content:space-between; gap:8px; }
+  .row .amt { font-weight:700; color:var(--maroon); white-space:nowrap; }
+  .meta { color:#7a6658; font-size:.85em; } .elder .meta { display:none; }
+  .pill { font-size:.75em; padding:2px 8px; border-radius:99px; background:#eee; }
+  .Paid { background:#d6f5d6; } .Partial { background:#ffe8a3; } .Pending { background:#fde2e2; }
+  nav { position:fixed; bottom:0; left:0; right:0; background:#fff; display:flex; border-top:1px solid #e6d9c4; }
+  nav button { flex:1; padding:14px 0; border:0; background:none; font-size:1em; color:#7a6658; }
+  nav button.on { color:var(--maroon); font-weight:700; }
+  #mic { position:fixed; bottom:64px; left:50%; transform:translateX(-50%); width:84px; height:84px; border-radius:50%; border:0;
+         background:var(--maroon); color:#fff; font-size:2em; box-shadow:0 6px 18px rgba(123,30,30,.4); }
+  #mic.rec { background:#d11; animation:p 1s infinite; } @keyframes p { 50% { transform:translateX(-50%) scale(1.08); } }
+  #mic + .lbl { position:fixed; bottom:152px; left:50%; transform:translateX(-50%); font-size:.8em; color:#7a6658; }
+  .card { background:#fff; border-radius:14px; padding:16px; border:2px solid var(--gold); margin:12px 0; }
+  .card label { display:block; margin:8px 0 2px; font-size:.85em; color:#7a6658; }
+  input, select { width:100%; padding:10px; font-size:1em; border:1px solid #d8c8ad; border-radius:8px; }
+  .btn { padding:12px 16px; border:0; border-radius:10px; font-size:1em; font-weight:600; margin-top:10px; }
+  .primary { background:var(--maroon); color:#fff; } .ghost { background:#eee; }
+  .toast { position:fixed; top:16px; left:50%; transform:translateX(-50%); background:#2b1a12; color:#fff; padding:10px 16px; border-radius:10px; z-index:9; }
+  .hidden { display:none !important; }
+</style>
+</head>
+<body>
+<header><h1>💍 ShagunBook</h1><small id="mode"></small></header>
+<div id="maint" class="banner info hidden"></div>
+<div id="voiceDown" class="banner warn hidden">🎤 Voice abhi band hai — please type entries.</div>
+<main id="view"></main>
+<button id="mic" title="Bol ke likhiye">🎤</button><div class="lbl" id="micLbl">Bol ke likhiye</div>
+<nav>
+  <button data-tab="shagun" class="on">Shagun</button>
+  <button data-tab="vendors">Vendors</button>
+  <button data-tab="summary">Summary</button>
+  <button data-tab="settings">Settings</button>
+</nav>
+
+<script>
+const API = "";
+const $ = (s) => document.querySelector(s);
+const inr = (n) => "₹" + Number(n || 0).toLocaleString("en-IN");
+const uid = localStorage.uid || (localStorage.uid = crypto.randomUUID());
+let state = { tab: "shagun", flags: {}, data: { shagun: [], vendors: [] }, pending: null, edited: false };
+const role = () => localStorage.role || "Friend";
+const lang = () => localStorage.lang || state.flags.default_language || "hi-IN";
+const toast = (m) => { const t = document.createElement("div"); t.className = "toast"; t.textContent = m; document.body.append(t); setTimeout(() => t.remove(), 3000); };
+
+// ---- feature flags (polled every 15s, so dashboard toggles apply without redeploy) ----
+async function loadFlags() {
+  try { state.flags = await (await fetch(`${API}/api/flags?userId=${uid}&role=${role()}`)).json(); } catch { state.flags = { voice_entry: false }; }
+  const f = state.flags;
+  document.documentElement.style.setProperty("--fs", f.elder_mode ? 1.3 : 1);
+  document.body.classList.toggle("elder", !!f.elder_mode);
+  const voiceOk = f.voice_entry && f.sarvam_enabled;
+  $("#mic").classList.toggle("hidden", !voiceOk); $("#micLbl").classList.toggle("hidden", !voiceOk);
+  $("#voiceDown").classList.toggle("hidden", f.sarvam_enabled !== false);
+  $("#maint").textContent = f.maintenance_message || ""; $("#maint").classList.toggle("hidden", !f.maintenance_message);
+  $("#mode").textContent = `${role()} · variant ${f.confirm_flow_variant}`;
+  render();
+}
+async function loadData() { state.data = await (await fetch(`${API}/api/entries`)).json(); render(); }
+
+// ---- views ----
+function render() {
+  const { shagun, vendors } = state.data, v = $("#view");
+  const pending = state.pending ? confirmCard() : "";
+  if (state.tab === "shagun") {
+    const total = shagun.reduce((s, x) => s + Number(x.amount), 0);
+    v.innerHTML = pending + `<div class="total">Total shagun<b>${inr(total)}</b><span class="meta">${shagun.length} guests</span></div>` +
+      [...shagun].reverse().map((x) => `<div class="row"><div><b>${x.guest}</b><div class="meta">${x.place || ""} · ${x.mode}</div></div><div class="amt">${inr(x.amount)}</div></div>`).join("") + manualForm();
+  } else if (state.tab === "vendors") {
+    v.innerHTML = pending + vendors.map((x) => {
+      const bal = (x.totalQuote || 0) - x.paid, st = !x.totalQuote ? "Partial" : bal <= 0 ? "Paid" : x.paid ? "Partial" : "Pending";
+      return `<div class="row"><div><b>${x.vendor}</b> <span class="pill ${st}">${st}</span><div class="meta">Paid ${inr(x.paid)}${x.totalQuote ? " of " + inr(x.totalQuote) : ""}</div></div><div class="amt">${bal > 0 ? "Due " + inr(bal) : ""}</div></div>`;
+    }).join("") + manualForm();
+  } else if (state.tab === "summary") {
+    const total = shagun.reduce((s, x) => s + Number(x.amount), 0);
+    const top = [...shagun].sort((a, b) => b.amount - a.amount).slice(0, 5);
+    const due = vendors.filter((x) => x.totalQuote && x.totalQuote > x.paid);
+    v.innerHTML = `<div class="total">Total shagun<b>${inr(total)}</b></div><h3>Top givers</h3>` +
+      top.map((x) => `<div class="row"><span>${x.guest}</span><span class="amt">${inr(x.amount)}</span></div>`).join("") +
+      `<h3>Balance due</h3>` + (due.map((x) => `<div class="row"><span>${x.vendor}</span><span class="amt">${inr(x.totalQuote - x.paid)}</span></div>`).join("") || "<p>All vendors paid ✅</p>") +
+      (state.flags.read_aloud_summary ? `<button class="btn primary" onclick="readAloud()">Sunaiye 🔊</button>` : "");
+  } else {
+    v.innerHTML = `<div class="card"><label>Language</label><select onchange="localStorage.lang=this.value">${["hi-IN","en-IN","kn-IN","ta-IN","te-IN","mr-IN","bn-IN"].map((l) => `<option ${l === lang() ? "selected" : ""}>${l}</option>`).join("")}</select>
+      <label>Who are you?</label><select onchange="localStorage.role=this.value;loadFlags()">${["Parent","Sibling","Cousin","Friend"].map((r) => `<option ${r === role() ? "selected" : ""}>${r}</option>`).join("")}</select>
+      <p class="meta">A/B stats: <a href="/api/ab-stats" target="_blank">/api/ab-stats</a></p></div>`;
+  }
+}
+const manualForm = () => `<details class="card"><summary><b>+ Add by typing</b></summary>
+  <label>Type</label><select id="mType"><option value="shagun">Shagun received</option><option value="vendor">Vendor payment</option></select>
+  <label>Name (guest / vendor)</label><input id="mName"><label>Amount ₹</label><input id="mAmt" type="number">
+  <button class="btn primary" onclick="manualSave()">Save</button></details>`;
+function manualSave() {
+  const t = $("#mType").value, n = $("#mName").value, a = Number($("#mAmt").value);
+  saveEntry(t === "vendor" ? { type: "vendor", vendor: n, service: n, paid: a, totalQuote: null } : { type: "shagun", guest: n, place: "", amount: a, mode: "cash" });
+}
+function confirmCard() {
+  const p = state.pending, fields = Object.keys(p).filter((k) => !["type", "heard"].includes(k));
+  return `<div class="card"><div class="meta">Suna: “${p.heard}”</div><b>${p.type === "vendor" ? "Vendor payment" : "Shagun received"}</b>` +
+    fields.map((k) => `<label>${k}</label><input value="${p[k] ?? ""}" oninput="state.edited=true;state.pending['${k}']=this.value">`).join("") +
+    `<button class="btn primary" onclick="confirmSave()">Save ✔</button> <button class="btn ghost" onclick="state.pending=null;render()">Cancel</button></div>`;
+}
+async function saveEntry(e) {
+  const r = await (await fetch(`${API}/api/entries`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...e, variant: state.flags.confirm_flow_variant, edited: state.edited }) })).json();
+  state.edited = false; await loadData(); return r;
+}
+async function confirmSave() { const { heard, ...e } = state.pending; state.pending = null; await saveEntry(e); toast("Saved ✔"); }
+
+// ---- voice: record -> WAV -> /api/transcribe -> /api/extract ----
+let rec = null;
+$("#mic").onclick = async () => {
+  if (rec) return stopRec();
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const ctx = new AudioContext({ sampleRate: 16000 }), src = ctx.createMediaStreamSource(stream), proc = ctx.createScriptProcessor(4096, 1, 1), chunks = [];
+    proc.onaudioprocess = (ev) => chunks.push(new Float32Array(ev.inputBuffer.getChannelData(0)));
+    src.connect(proc); proc.connect(ctx.destination);
+    rec = { stream, ctx, proc, chunks }; $("#mic").classList.add("rec");
+  } catch { toast("Mic permission nahi mili — demo text use kar rahe hain"); sendAudio(new Blob()); }
+};
+function stopRec() {
+  const { stream, ctx, proc, chunks } = rec; rec = null; $("#mic").classList.remove("rec");
+  proc.disconnect(); stream.getTracks().forEach((t) => t.stop());
+  sendAudio(encodeWav(chunks, ctx.sampleRate)); ctx.close();
+}
+function encodeWav(chunks, rate) {
+  const len = chunks.reduce((s, c) => s + c.length, 0), buf = new ArrayBuffer(44 + len * 2), v = new DataView(buf);
+  const w = (o, s) => [...s].forEach((c, i) => v.setUint8(o + i, c.charCodeAt(0)));
+  w(0, "RIFF"); v.setUint32(4, 36 + len * 2, true); w(8, "WAVEfmt "); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, rate, true); v.setUint32(28, rate * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true); w(36, "data"); v.setUint32(40, len * 2, true);
+  let o = 44; for (const c of chunks) for (const s of c) { v.setInt16(o, Math.max(-1, Math.min(1, s)) * 0x7fff, true); o += 2; }
+  return new Blob([buf], { type: "audio/wav" });
+}
+async function sendAudio(blob) {
+  toast("Sun rahe hain… 🎧");
+  try {
+    const t = await (await fetch(`${API}/api/transcribe?userId=${uid}&role=${role()}&language=${lang()}`, { method: "POST", body: blob })).json();
+    if (t.fallback) { toast("Voice band hai — type kijiye"); return loadFlags(); }
+    if (t.error) throw new Error(t.error);
+    const e = await (await fetch(`${API}/api/extract`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: t.text }) })).json();
+    if (e.error) throw new Error(e.error);
+    state.tab = e.type === "vendor" ? "vendors" : "shagun"; tabs();
+    if (state.flags.confirm_flow_variant === "B") {         // variant B: auto-save + Undo
+      const saved = await saveEntry(e);
+      const u = document.createElement("div"); u.className = "toast"; u.innerHTML = `Saved: ${e.guest || e.vendor} <button onclick="undo(${saved.id},this)">Undo</button>`;
+      document.body.append(u); setTimeout(() => u.remove(), 5000);
+    } else { state.pending = { heard: t.text, ...e }; render(); } // variant A: confirm card
+  } catch (err) { toast("Kuch gadbad hui 😕 " + err.message); }
+}
+async function undo(id, el) { await fetch(`${API}/api/entries?id=${id}`, { method: "DELETE" }); el.parentElement.remove(); loadData(); }
+
+async function readAloud() {
+  const r = await (await fetch(`${API}/api/summary-audio`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ language: lang() }) })).json();
+  if (r.audio) new Audio("data:audio/wav;base64," + r.audio).play();
+  else { const u = new SpeechSynthesisUtterance(r.text); u.lang = lang(); speechSynthesis.speak(u); } // mock-mode fallback
+  toast(r.text);
+}
+
+function tabs() { document.querySelectorAll("nav button").forEach((b) => b.classList.toggle("on", b.dataset.tab === state.tab)); }
+document.querySelectorAll("nav button").forEach((b) => (b.onclick = () => { state.tab = b.dataset.tab; tabs(); render(); }));
+loadFlags(); loadData(); setInterval(loadFlags, 15000);
+</script>
+</body>
+</html>
