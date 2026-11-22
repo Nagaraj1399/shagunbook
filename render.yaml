@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: shagunbook
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /healthz
+    envVars:
+      - key: SARVAM_API_KEY
+        sync: false
+      - key: FLAGSMITH_SERVER_KEY
+        value: X6KTYtxuos8vkDvh3bTmq2
