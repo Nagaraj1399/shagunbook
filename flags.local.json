@@ -1,0 +1,21 @@
+{
+  "_comment": "Local stand-in for Flagsmith, used when FLAGSMITH_SERVER_KEY is not set.",
+  "defaults": {
+    "voice_entry": true,
+    "sarvam_enabled": true,
+    "elder_mode": false,
+    "read_aloud_summary": true,
+    "default_language": "hi-IN",
+    "confirm_flow_variant": "A",
+    "maintenance_message": "",
+    "chaos_crash": false
+  },
+  "segments": {
+    "Parent": {
+      "elder_mode": true
+    },
+    "Cousin": {
+      "default_language": "kn-IN"
+    }
+  }
+}
