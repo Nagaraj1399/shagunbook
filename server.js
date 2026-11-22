@@ -63,7 +63,7 @@ async function transcribe(buf, lang) {
   if (MOCK_SARVAM) return MOCK_PHRASES[mockIdx++ % MOCK_PHRASES.length];
   const fd = new FormData();
   fd.append("file", new Blob([buf], { type: "audio/wav" }), "audio.wav");
-  fd.append("model", "saarika:v2.5"); // verify current model name in Sarvam docs
+  fd.append("model", "saaras:v4"); // verify current model name in Sarvam docs
   fd.append("language_code", lang || "hi-IN");
   const r = await fetch(`${SARVAM}/speech-to-text`, { method: "POST", headers: sh(), body: fd });
   if (!r.ok) throw new Error("STT " + r.status + " " + (await r.text()));
@@ -97,16 +97,16 @@ async function extract(text) {
     return { type: "shagun", guest, place, amount: wordsToNumber(t.split(" ne ")[1] || t), mode: /upi/.test(t) ? "upi" : /gift/.test(t) ? "gift" : "cash" };
   }
   const r = await fetch(`${SARVAM}/v1/chat/completions`, {
-    method: "POST", headers: { ...sh(), "Content-Type": "application/json" },
+    method: "POST", headers: { ...sh(), "Authorization": `Bearer ${SARVAM_KEY}`, "Content-Type": "application/json" },
     body: JSON.stringify({
-      model: "sarvam-m", temperature: 0, // verify current model name
+      model: "sarvam-105b", temperature: 0.1, max_tokens: 800, // verify current model name
       messages: [
         { role: "system", content: `Convert spoken Indian wedding ledger notes to JSON. Received from guest: {"type":"shagun","guest":"","place":"","amount":0,"mode":"cash|upi|gift"}. Paid to vendor: {"type":"vendor","vendor":"","service":"","paid":0,"totalQuote":null}. "ikyavan sau"=5100, "pachas hazaar"=50000, "do lakh"=200000. Reply ONLY JSON.` },
         { role: "user", content: text },
       ],
     }),
   });
-  if (!r.ok) throw new Error("CHAT " + r.status);
+  if (!r.ok) throw new Error("CHAT " + r.status + " " + (await r.text()));
   const out = (await r.json()).choices[0].message.content;
   return JSON.parse(out.match(/\{[\s\S]*\}/)[0]);
 }
@@ -117,6 +117,7 @@ async function translate(text, target) {
     method: "POST", headers: { ...sh(), "Content-Type": "application/json" },
     body: JSON.stringify({ input: text, source_language_code: "en-IN", target_language_code: target, model: "mayura:v1" }),
   });
+  if (!r.ok) return text; // fall back to English if translation fails
   return (await r.json()).translated_text;
 }
 
@@ -124,9 +125,9 @@ async function speak(text, lang) {
   if (MOCK_SARVAM) return null; // browser falls back to speechSynthesis in mock mode
   const r = await fetch(`${SARVAM}/text-to-speech`, {
     method: "POST", headers: { ...sh(), "Content-Type": "application/json" },
-    body: JSON.stringify({ text, target_language_code: lang, model: "bulbul:v2" }),
+    body: JSON.stringify({ text, language_code: lang, model: "bulbul:v3" }),
   });
-  if (!r.ok) throw new Error("TTS " + r.status);
+  if (!r.ok) throw new Error("TTS " + r.status + " " + (await r.text()));
   return (await r.json()).audios[0];
 }
 
